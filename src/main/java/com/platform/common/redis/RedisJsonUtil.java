@@ -6,15 +6,12 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
- * Redis JSON工具类（处理对象与Redis的JSON格式序列化/反序列化）
+ * Redis JSON工具类（处理对象与Redis的JSON格式序列化/反序列化，包含Hash类型操作）
  */
 @Component
 @ConditionalOnProperty(value = "spring.redis.enabled", havingValue = "Y")
@@ -23,6 +20,7 @@ public class RedisJsonUtil {
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
+    // ============================ 原有String/List类型方法（保持不变） ============================
     /**
      * 将对象以JSON格式存储到Redis，并设置过期时间
      *
@@ -322,6 +320,42 @@ public class RedisJsonUtil {
     }
 
     /**
+     * 将 ArrayList 中的每个元素作为独立元素，批量添加到 Redis LIST 的右侧（尾部）
+     * （每个元素会被序列化为 JSON 字符串，最终 Redis LIST 的每个元素对应一个对象）
+     *
+     * @param key      Redis 键
+     * @param list     要存储的 ArrayList（元素为任意对象，如 ArrayList<ChatUser>）
+     * @param timeout  过期时间（null 表示永不过期）
+     * @param unit     时间单位（timeout 为 null 时忽略）
+     * @param <T>      ArrayList 中元素的类型
+     * @return 操作后 Redis LIST 的总长度
+     */
+    public <T> Long pushArrayListToRedisList(String key, ArrayList<T> list, Long timeout, TimeUnit unit) {
+        // 空集合直接返回 0，避免无效操作
+        if (list == null || list.isEmpty()) {
+            return 0L;
+        }
+        // 将 ArrayList 中的每个元素单独序列化为 JSON 字符串
+        Collection<String> jsonElements = list.stream()
+                .map(JSON::toJSONString) // 逐个元素序列化
+                .collect(Collectors.toList());
+        // 批量添加到 Redis LIST 的右侧（也可根据需求改为 leftPushAll 从左侧添加）
+        Long totalSize = redisTemplate.opsForList().rightPushAll(key, jsonElements);
+        // 设置过期时间（如指定）
+        if (timeout != null && unit != null) {
+            expire(key, timeout, unit);
+        }
+        return totalSize;
+    }
+
+    /**
+     * 重载：无过期时间的版本
+     */
+    public <T> Long pushArrayListToRedisList(String key, ArrayList<T> list) {
+        return pushArrayListToRedisList(key, list, null, null);
+    }
+
+    /**
      * 获取列表中指定范围的元素（反序列化为指定类型）
      *
      * @param key   键
@@ -339,5 +373,221 @@ public class RedisJsonUtil {
         return jsonValues.stream()
                 .map(json -> JSON.parseObject((String) json, clazz))
                 .collect(Collectors.toList());
+    }
+
+    // ============================ 新增Hash类型操作方法 ============================
+
+    /**
+     * 向Hash表中存入一个字段和值（值会序列化为JSON）
+     *
+     * @param key     Redis键（Hash表的key）
+     * @param hashKey Hash表中的字段名
+     * @param value   字段值（任意对象）
+     * @param <T>     字段值的类型
+     */
+    public <T> void hset(String key, String hashKey, T value) {
+        String jsonValue = JSON.toJSONString(value);
+        redisTemplate.opsForHash().put(key, hashKey, jsonValue);
+    }
+
+    /**
+     * 向Hash表中存入一个字段和值，并设置整个Hash表的过期时间
+     *
+     * @param key     Redis键（Hash表的key）
+     * @param hashKey Hash表中的字段名
+     * @param value   字段值（任意对象）
+     * @param timeout 过期时间
+     * @param unit    时间单位
+     * @param <T>     字段值的类型
+     */
+    public <T> void hset(String key, String hashKey, T value, long timeout, TimeUnit unit) {
+        hset(key, hashKey, value);
+        expire(key, timeout, unit);
+    }
+
+    /**
+     * 从Hash表中获取指定字段的值（反序列化为指定类型）
+     *
+     * @param key     Redis键（Hash表的key）
+     * @param hashKey Hash表中的字段名
+     * @param clazz   目标类型
+     * @param <T>     目标类型的泛型
+     * @return 反序列化后的对象（字段不存在时返回null）
+     */
+    public <T> T hget(String key, String hashKey, Class<T> clazz) {
+        String jsonValue = (String) redisTemplate.opsForHash().get(key, hashKey);
+        if (jsonValue == null || "null".equals(jsonValue)) {
+            return null;
+        }
+        return JSON.parseObject(jsonValue, clazz);
+    }
+
+    /**
+     * 向Hash表中批量存入字段和值（值会序列化为JSON）
+     *
+     * @param key    Redis键（Hash表的key）
+     * @param values 字段-值映射（key为hash字段名，value为任意对象）
+     */
+    public void hmset(String key, Map<String, ?> values) {
+        if (values == null || values.isEmpty()) {
+            return;
+        }
+        // 将所有值序列化为JSON字符串
+        Map<String, String> jsonValues = values.entrySet().stream()
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        entry -> JSON.toJSONString(entry.getValue())
+                ));
+        redisTemplate.opsForHash().putAll(key, jsonValues);
+    }
+
+    /**
+     * 向Hash表中批量存入字段和值，并设置整个Hash表的过期时间
+     *
+     * @param key     Redis键（Hash表的key）
+     * @param values  字段-值映射
+     * @param timeout 过期时间
+     * @param unit    时间单位
+     */
+    public void hmset(String key, Map<String, ?> values, long timeout, TimeUnit unit) {
+        hmset(key, values);
+        expire(key, timeout, unit);
+    }
+
+    /**
+     * 从Hash表中批量获取指定字段的值（反序列化为指定类型）
+     *
+     * @param key      Redis键（Hash表的key）
+     * @param hashKeys 要获取的字段名集合
+     * @param clazz    目标类型
+     * @param <T>      目标类型的泛型
+     * @return 字段-值映射（顺序与hashKeys一致，不存在的字段对应null）
+     */
+    public <T> Map<String, T> hmget(String key, Collection<String> hashKeys, Class<T> clazz) {
+        if (hashKeys == null || hashKeys.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        // 转换为Object数组（RedisTemplate要求）
+        List<Object> hashKeyList = new ArrayList<>(hashKeys);
+        List<Object> jsonValues = redisTemplate.opsForHash().multiGet(key, hashKeyList);
+
+        // 构建结果映射
+        Map<String, T> result = new LinkedHashMap<>(hashKeys.size());
+        Iterator<String> keyIter = hashKeys.iterator();
+        Iterator<Object> valueIter = jsonValues.iterator();
+        while (keyIter.hasNext() && valueIter.hasNext()) {
+            String hashKey = keyIter.next();
+            Object jsonValue = valueIter.next();
+            if (jsonValue == null || "null".equals(jsonValue)) {
+                result.put(hashKey, null);
+            } else {
+                result.put(hashKey, JSON.parseObject((String) jsonValue, clazz));
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 获取Hash表中所有的字段和值（反序列化为指定类型）
+     *
+     * @param key   Redis键（Hash表的key）
+     * @param clazz 目标值类型
+     * @param <T>   目标类型的泛型
+     * @return 所有字段-值的映射（空映射表示Hash表不存在或为空）
+     */
+    public <T> Map<String, T> hgetAll(String key, Class<T> clazz) {
+        Map<Object, Object> entries = redisTemplate.opsForHash().entries(key);
+        if (entries == null || entries.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        // 转换并反序列化
+        return entries.entrySet().stream()
+                .collect(Collectors.toMap(
+                        entry -> (String) entry.getKey(), // hash字段名
+                        entry -> {
+                            String jsonValue = (String) entry.getValue();
+                            return jsonValue == null || "null".equals(jsonValue)
+                                    ? null
+                                    : JSON.parseObject(jsonValue, clazz);
+                        },
+                        (oldVal, newVal) -> newVal, // 解决key冲突（理论上不会发生）
+                        LinkedHashMap::new // 保持插入顺序
+                ));
+    }
+
+    /**
+     * 删除Hash表中的一个或多个字段
+     *
+     * @param key       Redis键（Hash表的key）
+     * @param hashKeys 要删除的字段名（可变参数）
+     * @return 成功删除的字段数量
+     */
+    public Long hdel(String key, String... hashKeys) {
+        if (hashKeys == null || hashKeys.length == 0) {
+            return 0L;
+        }
+        // 转换为Object数组（RedisTemplate要求）
+        Object[] keys = Arrays.stream(hashKeys).toArray();
+        return redisTemplate.opsForHash().delete(key, keys);
+    }
+
+    /**
+     * 判断Hash表中是否存在指定字段
+     *
+     * @param key     Redis键（Hash表的key）
+     * @param hashKey 字段名
+     * @return 存在返回true，否则false
+     */
+    public boolean hexists(String key, String hashKey) {
+        return redisTemplate.opsForHash().hasKey(key, hashKey);
+    }
+
+    /**
+     * 获取Hash表中所有的字段名
+     *
+     * @param key Redis键（Hash表的key）
+     * @return 字段名列表（空列表表示Hash表不存在或无字段）
+     */
+    public List<String> hkeys(String key) {
+        Set<Object> keys = redisTemplate.opsForHash().keys(key);
+        if (keys == null || keys.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return keys.stream()
+                .map(keyObj -> (String) keyObj)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 获取Hash表中所有字段的值（反序列化为指定类型）
+     *
+     * @param key   Redis键（Hash表的key）
+     * @param clazz 目标值类型
+     * @param <T>   目标类型的泛型
+     * @return 值列表（空列表表示Hash表不存在或无字段）
+     */
+    public <T> List<T> hvals(String key, Class<T> clazz) {
+        List<Object> jsonValues = redisTemplate.opsForHash().values(key);
+        if (jsonValues == null || jsonValues.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return jsonValues.stream()
+                .map(jsonVal -> {
+                    String json = (String) jsonVal;
+                    return json == null || "null".equals(json)
+                            ? null
+                            : JSON.parseObject(json, clazz);
+                })
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 获取Hash表中字段的数量
+     *
+     * @param key Redis键（Hash表的key）
+     * @return 字段数量（Hash表不存在时返回0）
+     */
+    public Long hlen(String key) {
+        return redisTemplate.opsForHash().size(key);
     }
 }
