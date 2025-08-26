@@ -6,6 +6,7 @@ import cn.hutool.json.JSONUtil;
 import com.platform.common.core.EnumUtils;
 import com.platform.common.enums.ResultEnum;
 import org.springframework.util.StringUtils;
+import com.platform.common.utils.EncryptUtils;
 
 import java.nio.charset.Charset;
 import java.util.HashMap;
@@ -44,6 +45,17 @@ public class AjaxResult extends HashMap<String, Object> {
     }
 
     /**
+     * 初始化一个新创建的 加密 AjaxResult 对象
+     */
+    public AjaxResult(ResultEnum resultEnum, String msg, Object data,String key) {
+        super.put(CODE_TAG, resultEnum.getCode());
+        super.put(MSG_TAG, StringUtils.isEmpty(msg) ? resultEnum.getInfo() : msg);
+        if (data != null) {
+            super.put(DATA_TAG, EncryptUtils.encrypt(data,key));
+        }
+    }
+
+    /**
      * 返回成功消息
      */
     public static AjaxResult success() {
@@ -55,6 +67,13 @@ public class AjaxResult extends HashMap<String, Object> {
      */
     public static AjaxResult success(Object data) {
         return new AjaxResult(ResultEnum.SUCCESS, null, data);
+    }
+
+    /**
+     * 返回成功加密数据
+     */
+    public static AjaxResult success(Object data,String secret) {
+        return new AjaxResult(ResultEnum.SUCCESS, null, data,secret);
     }
 
     /**

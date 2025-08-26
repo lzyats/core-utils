@@ -13,57 +13,40 @@ import org.springframework.data.redis.connection.RedisPassword;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializationContext;
-import org.springframework.data.redis.serializer.StringRedisSerializer;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 
 /**
- * redis配置（整合 FastJSON 序列化器，保留原有多实例、CacheManager 功能）
+ * redis配置
  */
 @Component
 @ConditionalOnProperty(value = "spring.redis.enabled", havingValue = "Y")
 @EnableCaching
-public class RedisConfig {
+public class RedisConfiga {
 
-    // ============================ 核心：修改 Template 序列化器 ============================
     @Bean
-    @Primary // 主 Template，RedisJsonUtil 自动注入此实例
+    @Primary
     public RedisTemplate<String, Object> redisTemplate(LettuceConnectionFactory factory) {
-        return createTemplate(factory); // 共用修改后的 createTemplate 方法
+        return createTemplate(factory);
     }
 
     /**
-     * 创建 Template（双实例共用：默认 Template + redisOtherTemplate）
-     * 关键调整：
-     * 1. Key/HashKey → StringRedisSerializer（无引号）
-     * 2. Value/HashValue → FastJsonRedisSerializer（Alibaba FastJSON）
+     * 创建模板
      */
     public RedisTemplate<String, Object> createTemplate(LettuceConnectionFactory factory) {
         RedisTemplate<String, Object> redisTemplate = new RedisTemplate<>();
         redisTemplate.setConnectionFactory(factory);
-
-        // 1. 定义序列化器
-        StringRedisSerializer stringSerializer = new StringRedisSerializer(); // Key 序列化器（无引号）
-        FastJsonRedisSerializer<Object> fastJsonSerializer = new FastJsonRedisSerializer<>(Object.class); // Value 序列化器
-
-        // 2. 配置 Key 序列化（核心：消除 KEY 前后引号）
-        redisTemplate.setKeySerializer(stringSerializer);
-        redisTemplate.setHashKeySerializer(stringSerializer); // Hash 字段名也用 String
-
-        // 3. 配置 Value 序列化（替换原有 Jackson，改用 FastJSON）
-        redisTemplate.setValueSerializer(fastJsonSerializer);
-        redisTemplate.setHashValueSerializer(fastJsonSerializer); // Hash 值用 FastJSON
-
-        // 4. 初始化 Template（必需，否则配置不生效）
-        redisTemplate.afterPropertiesSet();
-
+        Jackson2JsonRedisSerializer<Object> serializer = new Jackson2JsonRedisSerializer<>(Object.class);
+        redisTemplate.setValueSerializer(new GenericJackson2JsonRedisSerializer());
+        redisTemplate.setDefaultSerializer(serializer);
         return redisTemplate;
     }
 
-    // ============================ 保留原有：多 Redis 实例配置（redisOtherTemplate） ============================
     @Value("${spring.other.host:}")
     private String host;
 
@@ -76,10 +59,10 @@ public class RedisConfig {
     @Value("${spring.other.password:}")
     private String password;
 
-    @Bean(name = "redisOtherTemplate") // 第二个 Redis 实例 Template（如备用 Redis）
+    @Bean(name = "redisOtherTemplate")
     public RedisTemplate<String, Object> redisOtherTemplate(LettuceConnectionFactory factory) {
         if (!StringUtils.isEmpty(host)) {
-            // 新 Redis 实例配置（保留原有逻辑）
+            /* ========= 基本配置 ========= */
             RedisStandaloneConfiguration configuration = new RedisStandaloneConfiguration();
             configuration.setHostName(host);
             configuration.setPort(port);
@@ -87,37 +70,37 @@ public class RedisConfig {
             if (!StringUtils.isEmpty(password)) {
                 configuration.setPassword(RedisPassword.of(password));
             }
-            // 创建新的 Lettuce 连接工厂
             LettuceConnectionFactory newFactory = new LettuceConnectionFactory(configuration, factory.getClientConfiguration());
             newFactory.afterPropertiesSet();
-            return createTemplate(newFactory); // 复用修改后的序列化配置
+            return createTemplate(newFactory);
         }
-        // 若未配置备用 Redis，复用默认连接工厂
         return createTemplate(factory);
     }
 
-    // ============================ 保留原有：@Cacheable 注解支持（自定义 CacheManager） ============================
+    /**
+     * 自定义RedisCacheManager，用于在使用@Cacheable时设置ttl
+     */
     @Bean
     public RedisCacheManager redisCacheManager(RedisTemplate<String, Object> redisTemplate) {
         RedisCacheWriter redisCacheWriter = RedisCacheWriter.nonLockingRedisCacheWriter(redisTemplate.getConnectionFactory());
-        // 缓存配置：复用 Template 的 Value 序列化器（FastJSON），默认过期时间 30 天
         RedisCacheConfiguration redisCacheConfiguration = RedisCacheConfiguration.defaultCacheConfig()
                 .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(redisTemplate.getValueSerializer()));
         return new TtlRedisCacheManager(redisCacheWriter, redisCacheConfiguration);
     }
 
     /**
-     * 自定义 CacheManager：为 @Cacheable 注解的缓存统一设置 30 天过期时间
+     * 自定义RedisCacheManager
      */
     private class TtlRedisCacheManager extends RedisCacheManager {
+
         public TtlRedisCacheManager(RedisCacheWriter cacheWriter, RedisCacheConfiguration defaultCacheConfiguration) {
             super(cacheWriter, defaultCacheConfiguration);
         }
 
         @Override
         protected RedisCache createRedisCache(String name, RedisCacheConfiguration cacheConfig) {
-            // 所有 @Cacheable 缓存默认过期 30 天（保留原有逻辑）
             return super.createRedisCache(name, cacheConfig.entryTtl(Duration.ofDays(30)));
         }
     }
+
 }

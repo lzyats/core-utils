@@ -1,6 +1,7 @@
 package com.platform.common.web.page;
 
 import com.platform.common.enums.ResultEnum;
+import com.platform.common.utils.EncryptUtils;
 import lombok.Data;
 import lombok.experimental.Accessors;
 
@@ -44,6 +45,18 @@ public class TableDataInfo extends HashMap<String, Object> {
         super.put(CODE_TAG, resultEnum.getCode());
         super.put(MSG_TAG, resultEnum.getInfo());
         super.put(ROWS_TAG, list != null ? list : new ArrayList<>());
+        super.put(TOTAL_TAG, total.intValue());
+    }
+
+    /**
+     * 分页并加密
+     */
+    public TableDataInfo(List<?> list, Long total,String secret) {
+        ResultEnum resultEnum = ResultEnum.SUCCESS;
+        String liststr= EncryptUtils.encrypt(list,secret);
+        super.put(CODE_TAG, resultEnum.getCode());
+        super.put(MSG_TAG, resultEnum.getInfo());
+        super.put(ROWS_TAG, liststr);
         super.put(TOTAL_TAG, total.intValue());
     }
 

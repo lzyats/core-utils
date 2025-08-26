@@ -19,6 +19,18 @@ public class EncryptUtils {
     }
 
     /**
+     * 加密对象
+     */
+    public static String encrypt(Object data, String secret) {
+        // 构建aes
+        AES aes = initAes(secret);
+        // 1. 对象序列化为JSON字符串
+        String jsonData = com.alibaba.fastjson.JSON.toJSONString(data);
+        // 加密为16进制表示
+        return aes.encryptHex(jsonData);
+    }
+
+    /**
      * 解密
      */
     public static String decrypt(String content, String secret) {
@@ -26,6 +38,20 @@ public class EncryptUtils {
         AES aes = initAes(secret);
         // 解密为字符串
         return aes.decryptStr(content, CharsetUtil.CHARSET_UTF_8);
+    }
+
+    /**
+     * 解密：Base64解码→AES解密→JSON字符串→反序列化为对象
+     */
+    public static <T> T decrypt(String encryptedData, Class<T> clazz,String secret) throws Exception {
+        if (encryptedData == null) {
+            return null;
+        }
+        // 构建aes
+        AES aes = initAes(secret);
+        String jsonData = aes.decryptStr(encryptedData, CharsetUtil.CHARSET_UTF_8);
+        // 3. JSON反序列化为对象
+        return com.alibaba.fastjson.JSON.parseObject(jsonData, clazz);
     }
 
     /**
