@@ -5,6 +5,7 @@ import com.alibaba.fastjson.JSONException;
 import com.alibaba.fastjson.TypeReference;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.redis.core.Cursor;
@@ -31,7 +32,8 @@ public class RedisJsonUtil {
 
     // 注入自定义配置的 RedisTemplate（Key无引号，Value用FastJSON）
     @Autowired
-    private RedisTemplate<String, Object> redisTemplate;
+    @Qualifier("jsonRedisTemplate")
+    private RedisTemplate<String, Object> redisTemplateb;
 
     // 从配置文件读取 Redis 数据库编号（默认 0 号库）
     @Value("${spring.redis.database:0}")
@@ -47,9 +49,9 @@ public class RedisJsonUtil {
      */
     public void set(String key, Object value, Long timeout, TimeUnit unit) {
         if (timeout != null && unit != null) {
-            redisTemplate.opsForValue().set(key, value, timeout, unit);
+            redisTemplateb.opsForValue().set(key, value, timeout, unit);
         } else {
-            redisTemplate.opsForValue().set(key, value);
+            redisTemplateb.opsForValue().set(key, value);
         }
     }
 
@@ -68,7 +70,7 @@ public class RedisJsonUtil {
      * @return 反序列化后的对象（key 不存在时返回 null）
      */
     public <T> T get(String key, Class<T> clazz) {
-        Object value = redisTemplate.opsForValue().get(key);
+        Object value = redisTemplateb.opsForValue().get(key);
         if (value == null) {
             return null;
         }
@@ -84,7 +86,7 @@ public class RedisJsonUtil {
      * @return 反序列化后的对象
      */
     public <T> T get(String key, TypeReference<T> typeReference) {
-        Object value = redisTemplate.opsForValue().get(key);
+        Object value = redisTemplateb.opsForValue().get(key);
         if (value == null) {
             return null;
         }
@@ -101,7 +103,7 @@ public class RedisJsonUtil {
      * @return 子字符串
      */
     public String get(String key, long start, long end) {
-        Object value = redisTemplate.opsForValue().get(key, start, end);
+        Object value = redisTemplateb.opsForValue().get(key, start, end);
         return value == null ? null : value.toString();
     }
 
@@ -112,7 +114,7 @@ public class RedisJsonUtil {
      * @return 旧值（JSON 字符串格式）
      */
     public String getAndSet(String key, Object value) {
-        Object oldValue = redisTemplate.opsForValue().getAndSet(key, value);
+        Object oldValue = redisTemplateb.opsForValue().getAndSet(key, value);
         return oldValue == null ? null : JSON.toJSONString(oldValue);
     }
 
@@ -127,7 +129,7 @@ public class RedisJsonUtil {
         if (keys == null || keys.isEmpty()) {
             return Collections.emptyList();
         }
-        List<Object> values = redisTemplate.opsForValue().multiGet(keys);
+        List<Object> values = redisTemplateb.opsForValue().multiGet(keys);
         return values.stream()
                 .map(value -> value == null ? null : clazz.cast(value))
                 .collect(Collectors.toList());
@@ -143,9 +145,9 @@ public class RedisJsonUtil {
      */
     public boolean setIfAbsent(String key, Object value, Long timeout, TimeUnit unit) {
         if (timeout != null && unit != null) {
-            return redisTemplate.opsForValue().setIfAbsent(key, value, timeout, unit);
+            return redisTemplateb.opsForValue().setIfAbsent(key, value, timeout, unit);
         } else {
-            return redisTemplate.opsForValue().setIfAbsent(key, value);
+            return redisTemplateb.opsForValue().setIfAbsent(key, value);
         }
     }
 
@@ -159,7 +161,7 @@ public class RedisJsonUtil {
         if (maps == null || maps.isEmpty()) {
             return;
         }
-        redisTemplate.opsForValue().multiSet(maps);
+        redisTemplateb.opsForValue().multiSet(maps);
         // 批量设置过期时间
         if (timeout != null && unit != null) {
             expire(maps.keySet(), timeout, unit);
@@ -177,7 +179,7 @@ public class RedisJsonUtil {
         if (maps == null || maps.isEmpty()) {
             return false;
         }
-        Boolean result = redisTemplate.opsForValue().multiSetIfAbsent(maps);
+        Boolean result = redisTemplateb.opsForValue().multiSetIfAbsent(maps);
         if (result != null && result && timeout != null && unit != null) {
             expire(maps.keySet(), timeout, unit);
         }
@@ -195,7 +197,7 @@ public class RedisJsonUtil {
         if (timeout <= 0 || StringUtils.isEmpty(key)) {
             return false;
         }
-        return redisTemplate.expire(key, timeout, unit);
+        return redisTemplateb.expire(key, timeout, unit);
     }
 
     /**
@@ -208,7 +210,7 @@ public class RedisJsonUtil {
         if (keys == null || keys.isEmpty() || timeout <= 0) {
             return;
         }
-        keys.forEach(key -> redisTemplate.expire(key, timeout, unit));
+        keys.forEach(key -> redisTemplateb.expire(key, timeout, unit));
     }
 
     /**
@@ -222,7 +224,7 @@ public class RedisJsonUtil {
         }
         // 无通配符：直接删除
         if (!key.contains("*")) {
-            return redisTemplate.delete(key);
+            return redisTemplateb.delete(key);
         }
         // 有通配符：批量匹配删除
         Set<String> keys = this.keys(key);
@@ -326,10 +328,10 @@ public class RedisJsonUtil {
      */
     private RedisConnection getRedisConnection() {
         try {
-            RedisConnection connection = redisTemplate.getConnectionFactory().getConnection();
+            RedisConnection connection = redisTemplateb.getConnectionFactory().getConnection();
             if (connection.isClosed()) {
                 log.warn("获取的 Redis 连接已关闭，尝试重新获取");
-                connection = redisTemplate.getConnectionFactory().getConnection();
+                connection = redisTemplateb.getConnectionFactory().getConnection();
             }
             log.info("获取 Redis 连接成功（使用默认数据库：{}）", redisDbIndex);
             return connection;
@@ -348,7 +350,7 @@ public class RedisJsonUtil {
         if (StringUtils.isEmpty(pattern)) {
             return Collections.emptySet();
         }
-        return redisTemplate.keys(pattern);
+        return redisTemplateb.keys(pattern);
     }
 
     /**
@@ -360,7 +362,7 @@ public class RedisJsonUtil {
         if (keys == null || keys.isEmpty()) {
             return 0L;
         }
-        return redisTemplate.delete(keys);
+        return redisTemplateb.delete(keys);
     }
 
     /**
@@ -372,7 +374,7 @@ public class RedisJsonUtil {
         if (StringUtils.isEmpty(key)) {
             return false;
         }
-        return redisTemplate.hasKey(key);
+        return redisTemplateb.hasKey(key);
     }
 
     // ============================ List 类型操作 ============================
@@ -385,7 +387,7 @@ public class RedisJsonUtil {
      * @return 操作后列表的长度
      */
     public Long leftPush(String key, Object value, Long timeout, TimeUnit unit) {
-        Long size = redisTemplate.opsForList().leftPush(key, value);
+        Long size = redisTemplateb.opsForList().leftPush(key, value);
         if (timeout != null && unit != null) {
             expire(key, timeout, unit);
         }
@@ -401,7 +403,7 @@ public class RedisJsonUtil {
      * @return 操作后列表的长度
      */
     public Long rightPush(String key, Object value, Long timeout, TimeUnit unit) {
-        Long size = redisTemplate.opsForList().rightPush(key, value);
+        Long size = redisTemplateb.opsForList().rightPush(key, value);
         if (timeout != null && unit != null) {
             expire(key, timeout, unit);
         }
@@ -420,7 +422,7 @@ public class RedisJsonUtil {
         if (values == null || values.isEmpty()) {
             return 0L;
         }
-        Long size = redisTemplate.opsForList().leftPushAll(key, values);
+        Long size = redisTemplateb.opsForList().leftPushAll(key, values);
         if (timeout != null && unit != null) {
             expire(key, timeout, unit);
         }
@@ -439,7 +441,7 @@ public class RedisJsonUtil {
         if (values == null || values.isEmpty()) {
             return 0L;
         }
-        Long size = redisTemplate.opsForList().rightPushAll(key, values);
+        Long size = redisTemplateb.opsForList().rightPushAll(key, values);
         if (timeout != null && unit != null) {
             expire(key, timeout, unit);
         }
@@ -459,7 +461,7 @@ public class RedisJsonUtil {
         if (list == null || list.isEmpty()) {
             return 0L;
         }
-        Long totalSize = redisTemplate.opsForList().rightPushAll(key, list);
+        Long totalSize = redisTemplateb.opsForList().rightPushAll(key, list);
         if (timeout != null && unit != null) {
             expire(key, timeout, unit);
         }
@@ -483,7 +485,7 @@ public class RedisJsonUtil {
      * @return 反序列化后的元素列表（空列表表示无数据）
      */
     public <T> List<T> range(String key, long start, long end, Class<T> clazz) {
-        List<Object> values = redisTemplate.opsForList().range(key, start, end);
+        List<Object> values = redisTemplateb.opsForList().range(key, start, end);
         if (values == null || values.isEmpty()) {
             return Collections.emptyList();
         }
@@ -501,7 +503,7 @@ public class RedisJsonUtil {
      * @param <T>     字段值类型
      */
     public <T> void hset(String key, String hashKey, T value) {
-        redisTemplate.opsForHash().put(key, hashKey, value);
+        redisTemplateb.opsForHash().put(key, hashKey, value);
     }
 
     /**
@@ -527,7 +529,7 @@ public class RedisJsonUtil {
      * @return 反序列化后的对象（字段不存在时返回 null）
      */
     public <T> T hget(String key, String hashKey, Class<T> clazz) {
-        Object value = redisTemplate.opsForHash().get(key, hashKey);
+        Object value = redisTemplateb.opsForHash().get(key, hashKey);
         if (value == null) {
             return null;
         }
@@ -543,7 +545,7 @@ public class RedisJsonUtil {
         if (values == null || values.isEmpty()) {
             return;
         }
-        redisTemplate.opsForHash().putAll(key, values);
+        redisTemplateb.opsForHash().putAll(key, values);
     }
 
     /**
@@ -571,7 +573,7 @@ public class RedisJsonUtil {
             return Collections.emptyMap();
         }
         List<Object> hashKeyList = new ArrayList<>(hashKeys);
-        List<Object> values = redisTemplate.opsForHash().multiGet(key, hashKeyList);
+        List<Object> values = redisTemplateb.opsForHash().multiGet(key, hashKeyList);
 
         // 构建结果映射
         Map<String, T> result = new LinkedHashMap<>(hashKeys.size());
@@ -593,7 +595,7 @@ public class RedisJsonUtil {
      * @return 所有字段-值映射（空映射表示 Hash 表不存在或为空）
      */
     public <T> Map<String, T> hgetAll(String key, Class<T> clazz) {
-        Map<Object, Object> entries = redisTemplate.opsForHash().entries(key);
+        Map<Object, Object> entries = redisTemplateb.opsForHash().entries(key);
         if (entries == null || entries.isEmpty()) {
             return Collections.emptyMap();
         }
@@ -613,7 +615,7 @@ public class RedisJsonUtil {
      * @return 字段-值映射（value 为 Map<String, Object>）
      */
     public Map<String, Map<String, Object>> hgetAllMap(String key) {
-        Map<Object, Object> entries = redisTemplate.opsForHash().entries(key);
+        Map<Object, Object> entries = redisTemplateb.opsForHash().entries(key);
         if (entries == null || entries.isEmpty()) {
             return Collections.emptyMap();
         }
@@ -650,7 +652,7 @@ public class RedisJsonUtil {
             return 0L;
         }
         Object[] keys = Arrays.stream(hashKeys).toArray();
-        return redisTemplate.opsForHash().delete(key, keys);
+        return redisTemplateb.opsForHash().delete(key, keys);
     }
 
     /**
@@ -660,7 +662,7 @@ public class RedisJsonUtil {
      * @return 存在返回 true，否则 false
      */
     public boolean hexists(String key, String hashKey) {
-        return redisTemplate.opsForHash().hasKey(key, hashKey);
+        return redisTemplateb.opsForHash().hasKey(key, hashKey);
     }
 
     /**
@@ -669,7 +671,7 @@ public class RedisJsonUtil {
      * @return 字段名列表（空列表表示 Hash 表不存在或无字段）
      */
     public List<String> hkeys(String key) {
-        Set<Object> keys = redisTemplate.opsForHash().keys(key);
+        Set<Object> keys = redisTemplateb.opsForHash().keys(key);
         if (keys == null || keys.isEmpty()) {
             return Collections.emptyList();
         }
@@ -686,7 +688,7 @@ public class RedisJsonUtil {
      * @return 值列表（空列表表示 Hash 表不存在或无字段）
      */
     public <T> List<T> hvals(String key, Class<T> clazz) {
-        List<Object> values = redisTemplate.opsForHash().values(key);
+        List<Object> values = redisTemplateb.opsForHash().values(key);
         if (values == null || values.isEmpty()) {
             return Collections.emptyList();
         }
@@ -701,6 +703,6 @@ public class RedisJsonUtil {
      * @return 字段数量（Hash 表不存在时返回 0）
      */
     public Long hlen(String key) {
-        return redisTemplate.opsForHash().size(key);
+        return redisTemplateb.opsForHash().size(key);
     }
 }
