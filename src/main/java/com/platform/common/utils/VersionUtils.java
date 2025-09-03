@@ -39,13 +39,21 @@ public class VersionUtils {
     }
 
     /**
-     * 匹配版本
+     * 匹配 x.y.z 格式的版本号（支持小版本号多位数字，如 1.1.10、2.0.300）
+     * 格式规则：
+     * 1. 主版本号（x）：1-3位数字（如 1、99、255）
+     * 2. 次版本号（y）：1位及以上数字（如 1、10、123）
+     * 3. 修订版本号（z）：1位及以上数字（如 1、10、999）
+     * @param version 待匹配的版本号字符串
+     * @return 匹配成功返回 true，否则返回 false
      */
     public static boolean matchVersion(String version) {
-        if (StringUtils.isEmpty(version)) {
+        if (StrUtil.isEmpty(version)) {
             return false;
         }
-        return ReUtil.isMatch("\\d{1,3}(\\.\\d{1}){2}", version);
+        // 正则修改点：将 \\d{1}（固定1位）改为 \\d+（1位及以上）
+        String versionRegex = "^\\d{1,3}(\\.\\d+){2}$";
+        return ReUtil.isMatch(versionRegex, version);
     }
 
 }

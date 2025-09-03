@@ -56,6 +56,11 @@ public class RedisConfig {
     public RedisTemplate<String, Object> createTemplate(LettuceConnectionFactory factory) {
         RedisTemplate<String, Object> redisTemplate = new RedisTemplate<>();
         redisTemplate.setConnectionFactory(factory);
+        // 1. Key/HashKey用String序列化（无引号）
+        StringRedisSerializer stringSerializer = new StringRedisSerializer(StandardCharsets.UTF_8);
+        redisTemplate.setKeySerializer(stringSerializer);
+        redisTemplate.setHashKeySerializer(stringSerializer);
+
         Jackson2JsonRedisSerializer<Object> serializer = new Jackson2JsonRedisSerializer<>(Object.class);
         redisTemplate.setValueSerializer(new GenericJackson2JsonRedisSerializer());
         redisTemplate.setDefaultSerializer(serializer);
@@ -144,15 +149,22 @@ public class RedisConfig {
     }
 
     // ============================ 4. 缓存管理器配置（保持不变，按需调整） ============================
+    /**
+     * 自定义RedisCacheManager，用于在使用@Cacheable时设置ttl
+     */
     @Bean
-    public RedisCacheManager redisCacheManager(RedisTemplate<String, Object> jsonRedisTemplate) {
-        RedisCacheWriter writer = RedisCacheWriter.nonLockingRedisCacheWriter(jsonRedisTemplate.getConnectionFactory());
-        RedisCacheConfiguration config = RedisCacheConfiguration.defaultCacheConfig()
-                .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(jsonRedisTemplate.getValueSerializer()));
-        return new TtlRedisCacheManager(writer, config);
+    public RedisCacheManager redisCacheManager(RedisTemplate<String, Object> redisTemplate) {
+        RedisCacheWriter redisCacheWriter = RedisCacheWriter.nonLockingRedisCacheWriter(redisTemplate.getConnectionFactory());
+        RedisCacheConfiguration redisCacheConfiguration = RedisCacheConfiguration.defaultCacheConfig()
+                .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(redisTemplate.getValueSerializer()));
+        return new TtlRedisCacheManager(redisCacheWriter, redisCacheConfiguration);
     }
 
+    /**
+     * 自定义RedisCacheManager
+     */
     private class TtlRedisCacheManager extends RedisCacheManager {
+
         public TtlRedisCacheManager(RedisCacheWriter cacheWriter, RedisCacheConfiguration defaultCacheConfiguration) {
             super(cacheWriter, defaultCacheConfiguration);
         }
